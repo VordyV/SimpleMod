@@ -7,6 +7,7 @@ import host
 import importlib
 import os
 import imp
+import simplefuncs
 
 class Config():
 
@@ -54,6 +55,12 @@ class Config():
 		self.options[option] = value
 		return self.write()
 
+class Event(object):
+	def __init__(self, name, method, args):
+		self.name = name
+		self.method = method
+		self.args = args
+
 class Plugin(object):
 	def __init__(self, name, module, plugin):
 		self.module = module
@@ -64,12 +71,14 @@ PL_ATTR_NAME = 'name'
 PL_ATTR_VERSION = 'version'
 PL_ATTR_DEVELOPERS = 'developers'
 PL_ATTR_REQUIRED_PLUGINS = 'required_plugins'
-PL_ATTR_SHUTDOWN = 'shutdown'
+
+PL_EVENT_ENABLE = 'onEnable'
+PL_EVENT_DISABLE = 'onDisable'
 
 class SimpleMod(object):
 
 	name = "Simple Mod"
-	version = "0.0.1"
+	version = "0.0.2"
 	developer = ""
 
 	def __init__(self):
@@ -104,6 +113,7 @@ class SimpleMod(object):
 		logging.getLogger().addHandler(fileHandlerHis)
 
 		self.__plugins = {}
+		self.__events = {}
 
 	def add_plugin(self, name, module, plugin):
 		if name in self.__plugins: raise Exception("Plugin %s with the name has already been added" % name)
@@ -116,6 +126,16 @@ class SimpleMod(object):
 
 	def plugins(self):
 		return self.__plugins.keys()
+
+	# plugin: Plugin, events: List((event, args))
+	def add_plugin_events(self, plugin, events):
+
+		plugin.events = {}
+
+		for event in events:
+			plugin.events[event[0]] = Event(event[0], getattr(plugin.plugin, event[0]), event[1]) 
+
+		return True
 
 	def import_plugin(self, name):
 		module = imp.load_source(name, '%s/%s.py'%(self.config.get('sm_plugin_dir'), name))
@@ -134,33 +154,31 @@ class SimpleMod(object):
 		plugin = self.plugin(name)
 		try:
 			self.__req_plugins(plugin.plugin)
-			plugin.plugin.init()
+			events = simplefuncs.plugin_events(name)
+			self.add_plugin_events(plugin, events)
+			eEnable = plugin.events.get(PL_EVENT_ENABLE)
+			if eEnable is not None:
+				eEnable.method(*eEnable.args)
+
 		except Exception, e:
 			raise Exception("Plugin %s is not initialized: %s" % (name, e))
 
-	# plugin: Plugin
-	def __is_shutdown(self, plugin):
-		if getattr(plugin, PL_ATTR_SHUTDOWN, False) is False: return False
-		return True
-
-	def shutdown_plugin(self, name):
+	def disable_plugin(self, name):
 		plugin = self.plugin(name)
-		if self.__is_shutdown(plugin.plugin) is False:
-			logging.warning("Plugin %s Shutdown is not supported" % name)
-			return 1
 		try:
-			plugin.plugin.shutdown()
+			eDisable = plugin.events.get(PL_EVENT_DISABLE)
+			if eDisable is not None:
+				eDisable.method(*eDisable.args)
 		except Exception, e:
 			raise Exception("Plugin %s is not shutdown: %s" % (name, e))
 
 	def remove_plugin(self, name):
 		plugin = self.plugin(name)
-		if self.__is_shutdown(plugin.plugin) is False: return False
 		del self.__plugins[name]
 		return True
 
 	def reload_plugin(self, name):
-		self.shutdown_plugin(name)
+		self.disable_plugin(name)
 		if self.remove_plugin(name):
 			self.import_plugin(name)
 			self.initialize_plugin(name)
@@ -185,14 +203,14 @@ class SimpleMod(object):
 				self.initialize_plugin(plugin)
 				self.output("info", "Plugin %s is initialized", plugin)
 			except Exception, e:
-				logging.error("Plugin %s is not initialized: %s" % (plugin, e), exc_info=True)
+				logging.error(e, exc_info=True)
 
 	def shutdown_plugins(self):
 		plugins = self.plugins()
 		logging.info("Shutdowning plugins (%s)" % len(plugins))
 		for plugin in plugins:
 			try:
-				if self.shutdown_plugin(plugin): continue
+				if self.disable_plugin(plugin): continue
 				logging.info("Plugin %s is shutdown" % (plugin))
 			except Exception, e:
 				self.output("error", "Plugin %s is not shutdown: %s", plugin, e)
@@ -211,10 +229,11 @@ class SimpleMod(object):
 
 	def init(self):
 		self.output("info", "\nA %s v%s by %s has started its work", self.name, self.version, self.developer)
+		simplefuncs.add_event("onEnable")
+		simplefuncs.add_event("onDisable")
 		self.import_plugins()
 		self.config.implement()
 		self.initialize_plugins()
-		self.reload_plugins()
 
 	def output(self, level, text, *args):
 		text = text % args
@@ -228,12 +247,12 @@ class SimpleMod(object):
 		pass
 
 def logger(func):
-    def wrapper(*argv, **kwargs):
-    	try:
-        	return func(*argv, **kwargs)
-        except Exception, e:
-        	logging.critical(e, exc_info=True)
-    return wrapper
+	def wrapper(*argv, **kwargs):
+		try:
+			return func(*argv, **kwargs)
+		except Exception, e:
+			logging.critical(e, exc_info=True)
+	return wrapper
 
 simpleMod = SimpleMod()
 

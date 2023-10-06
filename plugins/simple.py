@@ -1,4 +1,5 @@
 import logging
+from simplefuncs import event
 
 class Simple(object):
 
@@ -12,8 +13,13 @@ class Simple(object):
 	def __init__(self, sm):
 		self.sm = sm
 
-	def init(self):
-		logging.info("Hi Simp")
+	@event()
+	def onEnable(self):
+		logging.info("Hi Simp!")
+
+	@event()
+	def onDisable(self):
+		logging.info("Bye Simp!")
 
 def setup(simplemod):
 	return Simple(simplemod)
